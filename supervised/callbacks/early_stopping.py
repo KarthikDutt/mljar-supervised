@@ -184,7 +184,7 @@ class EarlyStopping(Callback):
 
         if self.log_to_dir is not None and self.learner.algorithm_short_name not in [
             "Xgboost",
-            "Random Forest",
+            "Random Trees",
             "Extra Trees",
             "LightGBM",
             "CatBoost",

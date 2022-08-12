@@ -25,6 +25,8 @@ from tabulate import tabulate
 
 from supervised.utils.learning_curves import LearningCurves
 
+from .utils.utils import arcpy_localization_helper
+
 
 class Ensemble:
 
@@ -91,20 +93,6 @@ class Ensemble:
     def get_name(self):
         return self._name
 
-    def involved_model_names(self):
-        """Returns the list of all models involved in the current model.
-        For single model, it returns the list with the name of the model.
-        For ensemble model, it returns the list with the name of the ensemble and all internal models
-        (used to build ensemble).
-        For single model but trained on stacked data, it returns the list with the name of the model
-        (names of models used in stacking are not included)."""
-        if self.selected_models is None or not self.selected_models:
-            return [self._name]
-        l = []
-        for m in self.selected_models:
-            l += m["model"].involved_model_names()
-        return [self._name] + l
-
     def get_metric_name(self):
         return self.metric.name
 
@@ -112,7 +100,7 @@ class Ensemble:
         return self.metric
 
     def get_out_of_folds(self):
-        """Needed when ensemble is treated as model and we want to compute additional metrics for it"""
+        """ Needed when ensemble is treated as model and we want to compute additional metrics for it """
         # single prediction (in case of binary classification and regression)
         if self.oof_predictions is not None:
             return self.oof_predictions.copy(deep=True)
@@ -419,11 +407,16 @@ class Ensemble:
             select_models_desc += [
                 {"model": selected["model"]._name, "repeat": selected["repeat"]}
             ]
-        desc = f"# Summary of {self.get_name()}\n\n"
-        desc += "[<< Go back](../README.md)\n\n"
-        desc += "\n## Ensemble structure\n"
+        desc = f"# { arcpy_localization_helper('Summary of', 260108) } {self.get_name()}\n\n"
+        desc += f"[<< { arcpy_localization_helper('Go back', 260090) }](../README.md)\n\n"
+        desc += f"\n## { arcpy_localization_helper('Model name', 260113) }: Ensemble { arcpy_localization_helper('structure', 260112) }\n"
         selected = pd.DataFrame(select_models_desc)
-        desc += tabulate(selected.values, ["Model", "Weight"], tablefmt="pipe")
+        desc += tabulate(
+            selected.values, 
+            [arcpy_localization_helper('Model', 260128), arcpy_localization_helper('Weight', 260129)], 
+            tablefmt="pipe", 
+            floatfmt='n'
+        )
         desc += "\n"
         return desc
 

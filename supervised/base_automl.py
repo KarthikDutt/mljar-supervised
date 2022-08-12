@@ -39,8 +39,7 @@ from supervised.utils.leaderboard_plots import LeaderboardPlots
 from supervised.utils.metric import Metric
 from supervised.utils.metric import UserDefinedEvalMetric
 from supervised.utils.automl_plots import AutoMLPlots
-# disable EDA
-# from supervised.preprocessing.eda import EDA
+from supervised.preprocessing.eda import EDA
 from supervised.preprocessing.preprocessing_utils import PreprocessingUtils
 from supervised.tuner.time_controller import TimeController
 from supervised.utils.data_validation import (
@@ -51,6 +50,8 @@ from supervised.utils.data_validation import (
     check_integer,
 )
 from supervised.utils.utils import dump_data, load_data
+
+from .utils.utils import arcpy_localization_helper
 
 logger = logging.getLogger(__name__)
 logger.setLevel(LOG_LEVEL)
@@ -119,7 +120,7 @@ class BaseAutoML(BaseEstimator, ABC):
         }
 
     def _check_can_load(self):
-        """Checks if AutoML can be loaded from a folder"""
+        """ Checks if AutoML can be loaded from a folder"""
         if self.results_path is not None:
             # Dir exists and can be loaded
             if os.path.exists(self.results_path) and os.path.exists(
@@ -175,7 +176,6 @@ class BaseAutoML(BaseEstimator, ABC):
             self._random_state = params.get("random_state", self._random_state)
             stacked_models = params.get("stacked")
 
-            best_model_name = params.get("best_model")
             load_on_predict = params.get("load_on_predict")
             self._fit_level = params.get("fit_level")
             lazy_load = not (
@@ -184,12 +184,6 @@ class BaseAutoML(BaseEstimator, ABC):
             load_models = self._model_subpaths
             if load_on_predict is not None and self._fit_level == "finished":
                 load_models = load_on_predict
-                # just in case there is check for which models should be loaded
-                # fix https://github.com/mljar/mljar-supervised/issues/395
-                models_needed = self.models_needed_on_predict(best_model_name)
-                # join them and return unique list
-                load_models = list(np.unique(load_models + models_needed))
-
             models_map = {}
 
             for model_subpath in load_models:
@@ -204,6 +198,7 @@ class BaseAutoML(BaseEstimator, ABC):
                     self._models += [m]
                     models_map[m.get_name()] = m
 
+            best_model_name = params.get("best_model")
             self._best_model = None
             if best_model_name is not None:
                 self._best_model = models_map.get(best_model_name)
@@ -775,7 +770,7 @@ class BaseAutoML(BaseEstimator, ABC):
 
             if self.n_features_in_ * self.n_classes > 10000:
                 if self.algorithms == "auto":
-                    for a in ["Random Forest", "Extra Trees"]:
+                    for a in ["Random Trees", "Extra Trees"]:
                         if a in self._algorithms:
                             self._algorithms.remove(a)
 
@@ -959,17 +954,15 @@ class BaseAutoML(BaseEstimator, ABC):
             if self._stack_models:
                 self.verbose_print("AutoML will stack models")
             if self._train_ensemble:
-                self.verbose_print("AutoML will ensemble available models")
+                self.verbose_print("AutoML will ensemble availabe models")
 
             self._start_time = time.time()
             if self._time_ctrl is not None:
                 self._start_time -= self._time_ctrl.already_spend()
 
             # Automatic Exloratory Data Analysis
-            # I disabled EDA, because it won't be supported
-            # I recomend use pandas_profiling or Sweetviz
-            # if self._explain_level == 2:
-            #     EDA.compute(X, y, os.path.join(self._results_path, "EDA"))
+            if self._explain_level == 2:
+                EDA.compute(X, y, os.path.join(self._results_path, "EDA"))
 
             # Save data
             if sample_weight is not None:
@@ -1041,8 +1034,7 @@ class BaseAutoML(BaseEstimator, ABC):
                 if "hill_climbing" in step or step in ["ensemble", "stack"]:
                     if len(self._models) == 0:
                         raise AutoMLException(
-                            "No models produced. \nPlease check your data or"
-                            " submit a Github issue at https://github.com/mljar/mljar-supervised/issues/new."
+                            "No models produced. \nPlease check your data."
                         )
 
                 generated_params = []
@@ -1101,6 +1093,7 @@ class BaseAutoML(BaseEstimator, ABC):
                         self.verbose_print(
                             params.get("name") + " not trained. " + str(e)
                         )
+                        msg = arcpy_localization_helper("Model could not be trained.",260151, msg_type="WARNING", params=params.get("name"))
                     except Exception as e:
                         import traceback
 
@@ -1128,18 +1121,14 @@ class BaseAutoML(BaseEstimator, ABC):
         return self
 
     def _update_errors_report(self, model_name, error_msg):
-        """Append error message to errors.md file."""
+        """Append error message to errors.md file. """
         errors_filename = os.path.join(self._get_results_path(), "errors.md")
         with open(errors_filename, "a") as fout:
             self.verbose_print(f"There was an error during {model_name} training.")
             self.verbose_print(f"Please check {errors_filename} for details.")
             fout.write(f"## Error for {model_name}\n\n")
             fout.write(error_msg)
-            link = "https://github.com/mljar/mljar-supervised/issues/new"
-            fout.write(
-                f"\n\nPlease set a GitHub issue with above error message at: {link}"
-            )
-            fout.write("\n\n")
+
 
     def select_and_save_best(self, show_warnings=False):
         # Select best model based on the lowest loss
@@ -1207,10 +1196,14 @@ class BaseAutoML(BaseEstimator, ABC):
             if self._best_model is not None:
                 params["best_model"] = self._best_model.get_name()
                 load_on_predict = []
-                load_on_predict += self._best_model.involved_model_names()
                 if self._best_model._is_stacked and self._stacked_models is not None:
-                    for m in self._stacked_models:
-                        load_on_predict += m.involved_model_names()
+                    load_on_predict += [m.get_name() for m in self._stacked_models]
+                if "Ensemble" in self._best_model.get_type():
+                    load_on_predict += [
+                        ens["model"].get_name()
+                        for ens in self._best_model.selected_models
+                    ]
+                load_on_predict += [self._best_model.get_name()]
                 params["load_on_predict"] = list(np.unique(load_on_predict))
 
             if self._stacked_models is not None:
@@ -1225,66 +1218,29 @@ class BaseAutoML(BaseEstimator, ABC):
             ldb.insert(loc=0, column="Best model", value="")
             ldb.loc[
                 ldb.name == self._best_model.get_name(), "Best model"
-            ] = "**the best**"
+            ] = f"**{ arcpy_localization_helper('the best', 260107) }**"
             ldb["name"] = [f"[{m}]({m}/README.md)" for m in ldb["name"].values]
 
-            with open(os.path.join(self._results_path, "README.md"), "w") as fout:
-                fout.write(f"# AutoML Leaderboard\n\n")
-                fout.write(tabulate(ldb.values, ldb.columns, tablefmt="pipe"))
+            with open(os.path.join(self._results_path, "README.md"), "w", encoding="utf-8") as fout:
+                fout.write(f"# AutoML { arcpy_localization_helper('Leaderboard', 260106) }\n\n")
+                ldb_columns = [ # Localized version of ldb.columns
+                    arcpy_localization_helper("Best model", 260118),
+                    arcpy_localization_helper("Model name", 260113),
+                    arcpy_localization_helper("Model type", 260119),
+                    arcpy_localization_helper("Metric type", 260120),
+                    arcpy_localization_helper("Metric value", 260121),
+                    arcpy_localization_helper("train_time", 260111),
+                ]
+                try:
+                    if len(ldb.columns)>6:
+                        ldb_columns.append('Single Prediction time')
+                except:
+                    pass
+                fout.write(tabulate(ldb.values, ldb_columns, tablefmt="pipe", floatfmt='n'))
                 LeaderboardPlots.compute(ldb, self._results_path, fout)
 
                 if self._fit_level == "finished":
                     AutoMLPlots.add(self._results_path, self._models, fout)
-
-    def get_ensemble_models(self, ensemble_name="Ensemble"):
-        try:
-            params = json.load(
-                open(os.path.join(self.results_path, ensemble_name, "ensemble.json"))
-            )
-            return [m["model"] for m in params["selected_models"]]
-        except Exception as e:
-            return []
-
-    def models_needed_on_predict(self, required_model_name):
-        params = json.load(open(os.path.join(self.results_path, "params.json")))
-        saved_models = params.get("saved", [])
-        stacked_models = params.get("stacked", [])
-
-        if required_model_name not in saved_models:
-            raise AutoMLException(
-                f"Can't load model {required_model_name}. Please check if the model's name is correct."
-            )
-        # single model needed
-        if (
-            "Stacked" not in required_model_name
-            and "Ensemble" not in required_model_name
-        ):
-            return [required_model_name]
-        ensemble_models = self.get_ensemble_models("Ensemble")
-        # ensemble of single models
-        if required_model_name == "Ensemble":
-            return ensemble_models + [required_model_name]
-        # single model on stacked data
-        if required_model_name != "Stacked_Ensemble":
-            return list(
-                np.unique(
-                    ensemble_models
-                    + ["Ensemble"]
-                    + stacked_models
-                    + [required_model_name]
-                )
-            )
-        # must be stacked ensemble
-        stacked_ensemble_models = self.get_ensemble_models("Stacked_Ensemble")
-        return list(
-            np.unique(
-                ensemble_models
-                + ["Ensemble"]
-                + stacked_models
-                + stacked_ensemble_models
-                + [required_model_name]
-            )
-        )
 
     def _base_predict(self, X, model=None):
 
@@ -1336,8 +1292,14 @@ class BaseAutoML(BaseEstimator, ABC):
                 neg_label, pos_label = 0, 1
             target_is_numeric = self._data_info.get("target_is_numeric", False)
             if target_is_numeric:
-                neg_label = int(neg_label)
-                pos_label = int(pos_label)
+                try:
+                    neg_label = int(neg_label)
+                except:
+                    neg_label = int(float(neg_label))
+                try:
+                    pos_label = int(pos_label)
+                except:
+                    pos_label = int(float(pos_label))
             # assume that it is binary classification
             predictions["label"] = predictions.iloc[:, 1] > model._threshold
             predictions["label"] = predictions["label"].map(
@@ -1399,12 +1361,12 @@ class BaseAutoML(BaseEstimator, ABC):
         )
 
     def _get_mode(self):
-        """Gets the current mode"""
+        """ Gets the current mode"""
         self._validate_mode()
         return deepcopy(self.mode)
 
     def _get_ml_task(self):
-        """Gets the current ml_task. If "auto" it is determined"""
+        """ Gets the current ml_task. If "auto" it is determined"""
         self._validate_ml_task()
         if self.ml_task == "auto":
             classes_number = self.n_classes
@@ -1421,7 +1383,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.ml_task)
 
     def _get_results_path(self):
-        """Gets the current results_path"""
+        """ Gets the current results_path"""
         # if we already have the results path set, please return it
         if self._results_path is not None:
             return self._results_path
@@ -1461,7 +1423,7 @@ class BaseAutoML(BaseEstimator, ABC):
         raise AutoMLException("Cannot set directory for AutoML results")
 
     def _get_total_time_limit(self):
-        """Gets the current total_time_limit"""
+        """ Gets the current total_time_limit"""
         self._validate_total_time_limit()
         if self._get_mode() == "Optuna":
             return None  # there no training limit for model in the Optuna mode
@@ -1469,12 +1431,12 @@ class BaseAutoML(BaseEstimator, ABC):
         return deepcopy(self.total_time_limit)
 
     def _get_model_time_limit(self):
-        """Gets the current model_time_limit"""
+        """ Gets the current model_time_limit"""
         self._validate_model_time_limit()
         return deepcopy(self.model_time_limit)
 
     def _get_algorithms(self):
-        """Gets the current algorithms. If "auto" it is determined"""
+        """ Gets the current algorithms. If "auto" it is determined"""
         self._validate_algorithms()
         if self.algorithms == "auto":
             if self._get_mode() == "Explain":
@@ -1482,14 +1444,14 @@ class BaseAutoML(BaseEstimator, ABC):
                     "Baseline",
                     "Linear",
                     "Decision Tree",
-                    "Random Forest",
+                    "Random Trees",
                     "Xgboost",
                     "Neural Network",
                 ]
             if self._get_mode() == "Perform":
                 return [
                     "Linear",
-                    "Random Forest",
+                    "Random Trees",
                     "LightGBM",
                     "Xgboost",
                     "CatBoost",
@@ -1499,7 +1461,7 @@ class BaseAutoML(BaseEstimator, ABC):
                 return [
                     "Decision Tree",
                     "Linear",
-                    "Random Forest",
+                    "Random Trees",
                     "Extra Trees",
                     "LightGBM",
                     "Xgboost",
@@ -1509,7 +1471,7 @@ class BaseAutoML(BaseEstimator, ABC):
                 ]
             if self._get_mode() == "Optuna":
                 return [
-                    "Random Forest",
+                    "Random Trees",
                     "Extra Trees",
                     "LightGBM",
                     "Xgboost",
@@ -1520,12 +1482,12 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.algorithms)
 
     def _get_train_ensemble(self):
-        """Gets the current train_ensemble"""
+        """ Gets the current train_ensemble"""
         self._validate_train_ensemble()
         return deepcopy(self.train_ensemble)
 
     def _get_stack_models(self):
-        """Gets the current stack_models"""
+        """ Gets the current stack_models"""
         self._validate_stack_models()
         if self.stack_models == "auto":
             val = self._get_validation_strategy()
@@ -1536,7 +1498,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.stack_models)
 
     def _get_eval_metric(self):
-        """Gets the current eval_metric"""
+        """ Gets the current eval_metric"""
         self._validate_eval_metric()
         if isinstance(self.eval_metric, types.FunctionType):
             UserDefinedEvalMetric().set_metric(self.eval_metric)
@@ -1553,7 +1515,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.eval_metric)
 
     def _get_validation_strategy(self):
-        """Gets the current validation_strategy"""
+        """ Gets the current validation_strategy"""
         strat = {}
         self._validate_validation_strategy()
         if self.validation_strategy == "auto":
@@ -1597,7 +1559,7 @@ class BaseAutoML(BaseEstimator, ABC):
         return deepcopy(self.verbose)
 
     def _get_explain_level(self):
-        """Gets the current explain_level"""
+        """ Gets the current explain_level"""
         self._validate_explain_level()
         if self.explain_level == "auto":
             if self._get_mode() == "Explain":
@@ -1626,7 +1588,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.golden_features)
 
     def _get_features_selection(self):
-        """Gets the current features_selection"""
+        """ Gets the current features_selection"""
         self._validate_features_selection()
         if self.features_selection == "auto":
             if self._get_mode() == "Explain":
@@ -1641,7 +1603,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.features_selection)
 
     def _get_start_random_models(self):
-        """Gets the current start_random_models"""
+        """ Gets the current start_random_models"""
         self._validate_start_random_models()
         if self.start_random_models == "auto":
             if self._get_mode() == "Explain":
@@ -1656,7 +1618,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.start_random_models)
 
     def _get_hill_climbing_steps(self):
-        """Gets the current hill_climbing_steps"""
+        """ Gets the current hill_climbing_steps"""
         self._validate_hill_climbing_steps()
         if self.hill_climbing_steps == "auto":
             if self._get_mode() == "Explain":
@@ -1671,7 +1633,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.hill_climbing_steps)
 
     def _get_top_models_to_improve(self):
-        """Gets the current top_models_to_improve"""
+        """ Gets the current top_models_to_improve"""
         self._validate_top_models_to_improve()
         if self.top_models_to_improve == "auto":
             if self._get_mode() == "Explain":
@@ -1686,7 +1648,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.top_models_to_improve)
 
     def _get_boost_on_errors(self):
-        """Gets the current boost_on_errors"""
+        """ Gets the current boost_on_errors"""
         self._validate_boost_on_errors()
         if self.boost_on_errors == "auto":
             val = self._get_validation_strategy()
@@ -1704,7 +1666,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.boost_on_errors)
 
     def _get_kmeans_features(self):
-        """Gets the current kmeans_features"""
+        """ Gets the current kmeans_features"""
         self._validate_kmeans_features()
         if self.kmeans_features == "auto":
             if self._get_mode() == "Explain":
@@ -1719,7 +1681,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.kmeans_features)
 
     def _get_mix_encoding(self):
-        """Gets the current mix_encoding"""
+        """ Gets the current mix_encoding"""
         self._validate_mix_encoding()
         if self.mix_encoding == "auto":
             if self._get_mode() == "Explain":
@@ -1734,7 +1696,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.mix_encoding)
 
     def _get_max_single_prediction_time(self):
-        """Gets the current max_single_prediction_time"""
+        """ Gets the current max_single_prediction_time"""
         self._validate_max_single_prediction_time()
         if self.max_single_prediction_time is None:
             if self._get_mode() == "Perform":
@@ -1744,7 +1706,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.max_single_prediction_time)
 
     def _get_optuna_time_budget(self):
-        """Gets the current optuna_time_budget"""
+        """ Gets the current optuna_time_budget"""
         self._validate_optuna_time_budget()
 
         if self.optuna_time_budget is None:
@@ -1758,7 +1720,7 @@ class BaseAutoML(BaseEstimator, ABC):
             return deepcopy(self.optuna_time_budget)
 
     def _get_optuna_init_params(self):
-        """Gets the current optuna_init_params"""
+        """ Gets the current optuna_init_params"""
         self._validate_optuna_init_params()
         if self._get_mode() != "Optuna":
             # use only for mode Optuna
@@ -1766,7 +1728,7 @@ class BaseAutoML(BaseEstimator, ABC):
         return deepcopy(self.optuna_init_params)
 
     def _get_optuna_verbose(self):
-        """Gets the current optuna_verbose"""
+        """ Gets the current optuna_verbose"""
         self._validate_optuna_verbose()
         # use only for mode Optuna
         if self._get_mode() != "Optuna":
@@ -1774,17 +1736,17 @@ class BaseAutoML(BaseEstimator, ABC):
         return deepcopy(self.optuna_verbose)
 
     def _get_n_jobs(self):
-        """Gets the current n_jobs"""
+        """ Gets the current n_jobs"""
         self._validate_n_jobs()
         return deepcopy(self.n_jobs)
 
     def _get_random_state(self):
-        """Gets the current random_state"""
+        """ Gets the current random_state"""
         self._validate_random_state()
         return deepcopy(self.random_state)
 
     def _validate_mode(self):
-        """Validates mode parameter"""
+        """ Validates mode parameter"""
         valid_modes = ["Explain", "Perform", "Compete", "Optuna"]
         if self.mode not in valid_modes:
             raise ValueError(
@@ -1792,7 +1754,7 @@ class BaseAutoML(BaseEstimator, ABC):
             )
 
     def _validate_ml_task(self):
-        """Validates ml_task parameter"""
+        """ Validates ml_task parameter"""
         if isinstance(self.ml_task, str) and self.ml_task == "auto":
             return
 
@@ -1802,7 +1764,7 @@ class BaseAutoML(BaseEstimator, ABC):
             )
 
     def _validate_results_path(self):
-        """Validates path parameter"""
+        """ Validates path parameter"""
         if self.results_path is None or isinstance(self.results_path, str):
             return
 
@@ -1811,19 +1773,19 @@ class BaseAutoML(BaseEstimator, ABC):
         )
 
     def _validate_total_time_limit(self):
-        """Validates total_time_limit parameter"""
+        """ Validates total_time_limit parameter"""
         if self.total_time_limit is None:
             return
         if self.total_time_limit is not None:
             check_greater_than_zero_integer(self.total_time_limit, "total_time_limit")
 
     def _validate_model_time_limit(self):
-        """Validates model_time_limit parameter"""
+        """ Validates model_time_limit parameter"""
         if self.model_time_limit is not None:
             check_greater_than_zero_integer(self.model_time_limit, "model_time_limit")
 
     def _validate_algorithms(self):
-        """Validates algorithms parameter"""
+        """ Validates algorithms parameter"""
         if isinstance(self.algorithms, str) and self.algorithms == "auto":
             return
 
@@ -1834,12 +1796,12 @@ class BaseAutoML(BaseEstimator, ABC):
                 )
 
     def _validate_train_ensemble(self):
-        """Validates train_ensemble parameter"""
+        """ Validates train_ensemble parameter"""
         # `train_ensemble` defaults to True, no further checking required
         check_bool(self.train_ensemble, "train_ensemble")
 
     def _validate_stack_models(self):
-        """Validates stack_models parameter"""
+        """ Validates stack_models parameter"""
         # `stack_models` defaults to "auto". If "auto" return, else check if is valid bool
         if isinstance(self.stack_models, str) and self.stack_models == "auto":
             return
@@ -1847,7 +1809,7 @@ class BaseAutoML(BaseEstimator, ABC):
         check_bool(self.stack_models, "stack_models")
 
     def _validate_eval_metric(self):
-        """Validates eval_metric parameter"""
+        """ Validates eval_metric parameter"""
         if isinstance(self.eval_metric, types.FunctionType):
             return
 
@@ -1889,7 +1851,7 @@ class BaseAutoML(BaseEstimator, ABC):
             )
 
     def _validate_validation_strategy(self):
-        """Validates validation parameter"""
+        """ Validates validation parameter"""
         if (
             isinstance(self.validation_strategy, str)
             and self.validation_strategy == "auto"
@@ -1908,11 +1870,11 @@ class BaseAutoML(BaseEstimator, ABC):
             raise ValueError(f"Expected dict with keys: {' , '.join(required_keys)}")
 
     def _validate_verbose(self):
-        """Validates verbose parameter"""
+        """ Validates verbose parameter"""
         check_positive_integer(self.verbose, "verbose")
 
     def _validate_explain_level(self):
-        """Validates explain_level parameter"""
+        """ Validates explain_level parameter"""
         if isinstance(self.explain_level, str) and self.explain_level == "auto":
             return
         valid_explain_levels = [0, 1, 2]
@@ -1926,7 +1888,7 @@ class BaseAutoML(BaseEstimator, ABC):
             )
 
     def _validate_golden_features(self):
-        """Validates golden_features parameter"""
+        """ Validates golden_features parameter"""
         if isinstance(self.golden_features, str) and self.golden_features == "auto":
             return
         if isinstance(self.golden_features, int):
@@ -1934,7 +1896,7 @@ class BaseAutoML(BaseEstimator, ABC):
         check_bool(self.golden_features, "golden_features")
 
     def _validate_features_selection(self):
-        """Validates features_selection parameter"""
+        """ Validates features_selection parameter"""
         if (
             isinstance(self.features_selection, str)
             and self.features_selection == "auto"
@@ -1943,7 +1905,7 @@ class BaseAutoML(BaseEstimator, ABC):
         check_bool(self.features_selection, "features_selection")
 
     def _validate_start_random_models(self):
-        """Validates start_random_models parameter"""
+        """ Validates start_random_models parameter"""
         if (
             isinstance(self.start_random_models, str)
             and self.start_random_models == "auto"
@@ -1952,7 +1914,7 @@ class BaseAutoML(BaseEstimator, ABC):
         check_greater_than_zero_integer(self.start_random_models, "start_random_models")
 
     def _validate_hill_climbing_steps(self):
-        """Validates hill_climbing_steps parameter"""
+        """ Validates hill_climbing_steps parameter"""
         if (
             isinstance(self.hill_climbing_steps, str)
             and self.hill_climbing_steps == "auto"
@@ -1961,7 +1923,7 @@ class BaseAutoML(BaseEstimator, ABC):
         check_positive_integer(self.hill_climbing_steps, "hill_climbing_steps")
 
     def _validate_top_models_to_improve(self):
-        """Validates top_models_to_improve parameter"""
+        """ Validates top_models_to_improve parameter"""
         if (
             isinstance(self.top_models_to_improve, str)
             and self.top_models_to_improve == "auto"
@@ -1970,25 +1932,25 @@ class BaseAutoML(BaseEstimator, ABC):
         check_positive_integer(self.top_models_to_improve, "top_models_to_improve")
 
     def _validate_boost_on_errors(self):
-        """Validates boost_on_errors parameter"""
+        """ Validates boost_on_errors parameter"""
         if isinstance(self.boost_on_errors, str) and self.boost_on_errors == "auto":
             return
         check_bool(self.boost_on_errors, "boost_on_errors")
 
     def _validate_kmeans_features(self):
-        """Validates kmeans_features parameter"""
+        """ Validates kmeans_features parameter"""
         if isinstance(self.kmeans_features, str) and self.kmeans_features == "auto":
             return
         check_bool(self.kmeans_features, "kmeans_features")
 
     def _validate_mix_encoding(self):
-        """Validates mix_encoding parameter"""
+        """ Validates mix_encoding parameter"""
         if isinstance(self.mix_encoding, str) and self.mix_encoding == "auto":
             return
         check_bool(self.mix_encoding, "mix_encoding")
 
     def _validate_max_single_prediction_time(self):
-        """Validates max_single_prediction_time parameter"""
+        """ Validates max_single_prediction_time parameter"""
         if self.max_single_prediction_time is None:
             return
         check_greater_than_zero_integer_or_float(
@@ -1996,13 +1958,13 @@ class BaseAutoML(BaseEstimator, ABC):
         )
 
     def _validate_optuna_time_budget(self):
-        """Validates optuna_time_budget parameter"""
+        """ Validates optuna_time_budget parameter"""
         if self.optuna_time_budget is None:
             return
         check_greater_than_zero_integer(self.optuna_time_budget, "optuna_time_budget")
 
     def _validate_optuna_init_params(self):
-        """Validates optuna_init_params parameter"""
+        """ Validates optuna_init_params parameter"""
         if self.optuna_init_params is None:
             return
         if type(self.optuna_init_params) is not dict:
@@ -2011,17 +1973,17 @@ class BaseAutoML(BaseEstimator, ABC):
             )
 
     def _validate_optuna_verbose(self):
-        """Validates optuna_verbose parameter"""
+        """ Validates optuna_verbose parameter"""
         if self.optuna_verbose is None:
             return
         check_bool(self.optuna_verbose, "optuna_verbose")
 
     def _validate_n_jobs(self):
-        """Validates mix_encoding parameter"""
+        """ Validates mix_encoding parameter"""
         check_integer(self.n_jobs, "n_jobs")
 
     def _validate_random_state(self):
-        """Validates random_state parameter"""
+        """ Validates random_state parameter"""
         check_positive_integer(self.random_state, "random_state")
 
     def to_json(self):
@@ -2173,11 +2135,11 @@ a:hover {
         beginning = ""
 
         if page_type == "main":
-            beginning += """<img src="https://raw.githubusercontent.com/mljar/visual-identity/main/media/mljar_AutomatedML.png" style="height:128px; margin-left: auto;
-margin-right: auto;display: block;"/>\n\n"""
-            # disable EDA
-            # if os.path.exists(os.path.join(self._results_path, "EDA")):
-            #     beginning += "<a onclick=\"toggleShow('EDA');toggleShow('main')\" >Automatic Exploratory Data Analysis Report</a>"
+#             beginning += """<img src="https://raw.githubusercontent.com/mljar/visual-identity/main/media/mljar_AutomatedML.png" style="height:128px; margin-left: auto;
+# margin-right: auto;display: block;"/>\n\n"""
+            if os.path.exists(os.path.join(self._results_path, "EDA")):
+                temp_dtr = "<a onclick=\"toggleShow('EDA');toggleShow('main')\" >" + arcpy_localization_helper('Exploratory Data Analysis', 260208) + "</a>"
+                beginning += temp_dtr
             if os.path.exists(os.path.join(self._results_path, "optuna/README.md")):
                 beginning += "<h2><a onclick=\"toggleShow('optuna');toggleShow('main')\" >&#187; Optuna Params Tuning Report</a></h2>"
 

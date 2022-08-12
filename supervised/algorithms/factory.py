@@ -17,7 +17,11 @@ class AlgorithmFactory(object):
             Algorithm = AlgorithmsRegistry.get_algorithm_class(ml_task, alg_type)
             return Algorithm(params)
         except Exception as e:
-            raise AutoMLException(f"Cannot get algorithm class. {str(e)}")
+            try:
+                Algorithm = AlgorithmsRegistry.get_algorithm_class(ml_task, 'Random Trees')
+                return Algorithm(params)
+            except Exception as e:
+                raise AutoMLException(f"Cannot get algorithm class. {str(e)}")
 
     @classmethod
     def load(cls, json_desc, learner_path, lazy_load):

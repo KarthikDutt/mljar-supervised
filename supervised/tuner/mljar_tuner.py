@@ -279,7 +279,7 @@ class MljarTuner:
             "Xgboost",
             "LightGBM",
             "CatBoost",
-            "Random Forest",
+            "Random Trees",
             "Extra Trees",
             "Neural Network",
         ]
@@ -421,7 +421,7 @@ class MljarTuner:
             "Xgboost",
             "CatBoost",
             "Neural Network",
-            "Random Forest",
+            "Random Trees",
             "Extra Trees",
             "Nearest Neighbors",
         ]:
@@ -463,7 +463,7 @@ class MljarTuner:
             "Xgboost",
             "LightGBM",
             "CatBoost",
-            "Random Forest",
+            "Random Trees",
             "Extra Trees",
             "Neural Network",
             "Nearest Neighbors",
@@ -515,7 +515,7 @@ class MljarTuner:
 
         rest_params = []
         for m in [
-            "Random Forest",
+            "Random Trees",
             "Extra Trees",
             "Neural Network",
             "Nearest Neighbors",
@@ -532,7 +532,7 @@ class MljarTuner:
                 "LightGBM",
                 "Xgboost",
                 "CatBoost",
-                "Random Forest",
+                "Random Trees",
                 "Extra Trees",
                 "Neural Network",
                 "Nearest Neighbors",
@@ -749,7 +749,6 @@ class MljarTuner:
             params["preprocessing"]["golden_features"] = {
                 "results_path": results_path,
                 "ml_task": self._ml_task,
-                "n_jobs": self._n_jobs,
             }
             if (
                 self._golden_features is not None
@@ -826,7 +825,7 @@ class MljarTuner:
                 "LightGBM",
                 "CatBoost",
                 "Neural Network",
-                "Random Forest",
+                "Random Trees",
                 "Extra Trees",
             ]:
                 continue
@@ -920,7 +919,7 @@ class MljarTuner:
                 "LightGBM",
                 "CatBoost",
                 "Neural Network",
-                "Random Forest",
+                "Random Trees",
                 "Extra Trees",
             ]:
                 continue
@@ -980,7 +979,7 @@ class MljarTuner:
                 self._ml_task, self._eval_metric
             )
         elif model_info["class"].algorithm_short_name in [
-            "Random Forest",
+            "Random Treees",
             "Extra Trees",
         ]:
             model_params["eval_metric_name"] = self._eval_metric

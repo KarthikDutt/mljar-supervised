@@ -77,7 +77,7 @@ class OptunaTuner:
     def is_optimizable(algorithm_name):
         return algorithm_name in [
             "Extra Trees",
-            "Random Forest",
+            "Random Trees",
             "CatBoost",
             "Xgboost",
             "LightGBM",
@@ -163,7 +163,7 @@ class OptunaTuner:
                 self.n_jobs,
                 self.random_state,
             )
-        elif algorithm == "Random Forest":
+        elif algorithm == "Random Trees":
             objective = RandomForestObjective(
                 self.ml_task,
                 X_train,
@@ -252,7 +252,7 @@ class OptunaTuner:
             best["max_steps"] = objective.max_steps  # each step has 100 trees
             best["seed"] = objective.seed
             best["eval_metric_name"] = self.eval_metric.name
-        elif algorithm == "Random Forest":
+        elif algorithm == "Random Trees":
             # Random Forest is not using early stopping
             best["max_steps"] = objective.max_steps  # each step has 100 trees
             best["seed"] = objective.seed

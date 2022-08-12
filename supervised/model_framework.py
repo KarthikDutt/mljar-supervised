@@ -38,6 +38,9 @@ import joblib
 
 from supervised.tuner.optuna.tuner import OptunaTuner
 
+from .utils.utils import arcpy_localization_helper
+
+
 
 class ModelFramework:
     def __init__(self, params, callbacks=[]):
@@ -230,16 +233,25 @@ class ModelFramework:
 
                     self.callbacks.on_iteration_start()
 
-                    learner.fit(
-                        X_train,
-                        y_train,
-                        sample_weight,
-                        X_validation,
-                        y_validation,
-                        sample_weight_validation,
-                        log_to_file,
-                        self._max_time_for_learner,
-                    )
+                    try:
+                        learner.fit(
+                            X_train,
+                            y_train,
+                            sample_weight,
+                            X_validation,
+                            y_validation,
+                            sample_weight_validation,
+                            log_to_file,
+                            self._max_time_for_learner,
+                        )
+                    except:
+                        msg = arcpy_localization_helper("Model could not be trained.",260151, msg_type="WARNING", params=str(learner.algorithm_name))
+                        try:
+                            if np.shape(X_train)[1] < 2:
+                                msg = arcpy_localization_helper("There is not enough variability in the field.", 110180,
+                                                                msg_type="WARNING", params='')
+                        except:
+                            pass
 
                     if self.params.get("injected_sample_weight", False):
                         # print("Dont use sample weight in model evaluation")
@@ -391,15 +403,6 @@ class ModelFramework:
     def get_name(self):
         return self._name
 
-    def involved_model_names(self):
-        """Returns the list of all models involved in the current model.
-        For single model, it returns the list with the name of the model.
-        For ensemble model, it returns the list with the name of the ensemble and all internal models
-        (used to build ensemble).
-        For single model but trained on stacked data, it returns the list with the name of the model
-        (names of models used in stacking are not included)."""
-        return [self._name]
-
     def is_valid(self):
         """is_valid is used in Ensemble to check if it has more than 1 model in it.
         If Ensemble has only 1 model in it, then Ensemble shouldn't be used as best model"""
@@ -503,8 +506,6 @@ class ModelFramework:
                 "train_time": self.get_train_time(),
                 "is_stacked": self._is_stacked,
             }
-            if type(desc["final_loss"]) == np.float32:
-                desc["final_loss"] = str(desc["final_loss"])
             if self._threshold is not None:
                 desc["threshold"] = self._threshold
             if self._single_prediction_time is not None:
@@ -540,26 +541,29 @@ class ModelFramework:
             self._ml_task, self.learner_params["model_type"]
         )
         short_name = self.learner_params["model_type"]
-        desc = f"# Summary of {self.get_name()}\n\n"
+        desc = f"# { arcpy_localization_helper('Summary of', 260108) } {self.get_name()}\n\n"
 
-        desc += "[<< Go back](../README.md)\n\n"
+        desc += f"[<< { arcpy_localization_helper('Go back', 260090) }](../README.md)\n\n"
 
         if long_name == short_name:
-            desc += f"\n## {short_name}\n"
+            desc += f"\n## { arcpy_localization_helper('Model name', 260113) }: {short_name}\n"
         else:
-            desc += f"\n## {long_name} ({short_name})\n"
+            desc += f"\n## { arcpy_localization_helper('Model name', 260113) }: {long_name} ({short_name})\n"
+
+        desc += f"\n## { arcpy_localization_helper('Model parameters', 260114) } \n" 
+
         for k, v in self.learner_params.items():
             if k in ["model_type", "ml_task", "seed"]:
                 continue
             desc += f"- **{k}**: {v}\n"
-        desc += "\n## Validation\n"
+        # desc += f"\n## { arcpy_localization_helper('Validation', 260109) }\n"
         for k, v in self.validation_params.items():
             if "path" not in k:
                 desc += f" - **{k}**: {v}\n"
-        desc += "\n## Optimized metric\n"
+        desc += f"\n## { arcpy_localization_helper('Optimized metric', 260110) }\n"
         desc += f"{self.get_metric_name()}\n"
-        desc += "\n## Training time\n"
-        desc += f"\n{np.round(self.train_time,1)} seconds\n"
+        desc += f"\n## { arcpy_localization_helper('Training time', 260111) }\n"
+        desc += f"\n{np.round(self.train_time,1)} { arcpy_localization_helper('seconds', 260115) }\n"
         return desc
 
     @staticmethod

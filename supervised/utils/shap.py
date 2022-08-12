@@ -59,7 +59,7 @@ class PlotSHAP:
         if algorithm.algorithm_short_name in [
             "Xgboost",
             "Decision Tree",
-            "Random Forest",
+            "Random Trees",
             "LightGBM",
             "Extra Trees",
             "CatBoost",
